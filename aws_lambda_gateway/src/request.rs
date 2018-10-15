@@ -4,7 +4,7 @@ use std::fmt;
 use base64;
 use http;
 use serde::{de::Error as DeError, de::MapAccess, de::Visitor, Deserialize, Deserializer};
-
+use std::collections::BTreeMap;
 use body::Body;
 
 #[derive(Debug)]
@@ -25,6 +25,8 @@ impl<'de> Deserialize<'de> for ApiGatewayProxyRequest {
 struct ApiGatewayProxyRequestDef<'a> {
     #[serde(default, borrow)]
     path: Option<Cow<'a, str>>,
+    #[serde(default, borrow, rename = "queryStringParameters")]
+    query: Option<BTreeMap<Cow<'a, str>, Cow<'a, str>>>,
     #[serde(default, borrow, rename = "httpMethod")]
     http_method: Option<Cow<'a, str>>,
     #[serde(default)]
@@ -40,7 +42,14 @@ impl<'a> ApiGatewayProxyRequestDef<'a> {
         let mut builder = http::Request::builder();
 
         if let Some(path) = self.path {
-            builder.uri(path.as_ref());
+            if let Some(query) = self.query {
+                let query_str: String = query.iter().map(|(k, v)| format!("{}={}&",k, v)).collect();
+                let whole_path = format!("{}?{}", path.as_ref(), query_str);
+                let without_last_amp = &whole_path[..whole_path.len()-1];
+                builder.uri(without_last_amp);
+            } else {
+                builder.uri(path.as_ref());
+            }
         }
 
         if let Some(http_method) = self.http_method {
@@ -125,6 +134,7 @@ fn deserialize_complex() {
 
     assert_eq!(req.method(), http::Method::POST);
     assert_eq!(req.uri().path(), "/path/to/resource");
+    assert_eq!(req.uri(), "/path/to/resource?bar=&foo=bar");
     assert_eq!(req.body().as_str().unwrap(), "{\"test\":\"body\"}");
     assert_eq!(
         req.headers()["Accept"],
